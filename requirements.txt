@@ -1,0 +1,7 @@
+# Colab で使うライブラリ（yt-dlp は TikTok 側の変更に追従するため常に最新を入れる）
+yt-dlp
+faster-whisper>=1.1
+janome>=0.5
+gradio>=6,<7
+pandas
+gspread>=6
