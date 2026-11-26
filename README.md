@@ -6,10 +6,10 @@ TikTok 動画の URL を貼ると、全編を文字起こしして Google ドラ
 
 1. 下のリンクから Colab でノートを開く（Google アカウントでログイン）
    - https://colab.research.google.com/github/Daiki9615/TiTok-/blob/claude/beautiful-cori-0ern9t/notebooks/TikTok_Transcriber.ipynb
-2. 「ランタイム」→「ランタイムのタイプを変更」→ **T4 GPU** → 保存
-3. 「ランタイム」→「すべてのセルを実行」
-4. ドライブへのアクセスを「許可」、最後のセルでパスワードを決めて Enter
-5. 表示された `https://xxxx.gradio.live` を開き、ユーザー名 `user` とパスワードでログイン
+2. ▶ を 1 回押す
+3. Google の画面が出たら自分のアカウントを選んで「許可」
+4. 下に出るリンクを開き、表示されたパスワードでログイン
+
 
 ## 画面
 
