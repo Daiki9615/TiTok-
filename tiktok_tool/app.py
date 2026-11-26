@@ -426,4 +426,4 @@ class App:
 def launch(store: DataStore, fetcher=None, transcriber=None, sheets=None, password: str | None = None, share: bool = True, **kw):
     demo = App(store, fetcher, transcriber, sheets).build()
     auth = ("user", password) if password else None
-    return demo.launch(share=share, auth=auth, auth_message="ユーザー名は user、パスワードはノートで設定したものです", **kw)
+    return demo.launch(share=share, auth=auth, auth_message="ユーザー名は user、パスワードは Colab のノートに表示されたものです", **kw)
