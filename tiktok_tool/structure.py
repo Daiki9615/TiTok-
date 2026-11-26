@@ -174,8 +174,6 @@ def claude_prompt(s: dict[str, Any]) -> str:
     out += ["", "## 構成の骨組み（この流れと秒数に沿ってください）", table]
     if s.get("analysis_summary"):
         out += ["", "## 参考にした動画の分析結果", s["analysis_summary"]]
-    if s.get("knowledge_digest"):
-        out += ["", "## 台本に活かしてほしいマーケティングの知見", s["knowledge_digest"]]
     out += [
         "",
         "## 注意",

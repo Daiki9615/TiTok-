@@ -26,8 +26,7 @@ class DataStore:
         self.videos_dir = self.base / "videos"
         self.structures_dir = self.base / "structures"
         self.settings_dir = self.base / "settings"
-        self.knowledge_dir = self.base / "knowledge"
-        for d in (self.videos_dir, self.structures_dir, self.settings_dir, self.knowledge_dir):
+        for d in (self.videos_dir, self.structures_dir, self.settings_dir):
             d.mkdir(parents=True, exist_ok=True)
 
     # ---- 動画 ----
@@ -112,35 +111,6 @@ class DataStore:
             except (OSError, json.JSONDecodeError):
                 continue
         out.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
-        return out
-
-    # ---- 知見 ----
-    def save_knowledge(self, rec: dict[str, Any]) -> str:
-        kid = rec.get("id") or "k-" + datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
-        if not re.fullmatch(r"[\w\-]+", kid):
-            raise ValueError("不正な ID")
-        rec["id"] = kid
-        rec["updated_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
-        _atomic_write(self.knowledge_dir / f"{kid}.json", rec)
-        return kid
-
-    def get_knowledge(self, kid: str) -> dict[str, Any]:
-        if not re.fullmatch(r"[\w\-]+", kid):
-            raise ValueError("不正な ID")
-        return json.loads((self.knowledge_dir / f"{kid}.json").read_text(encoding="utf-8"))
-
-    def delete_knowledge(self, kid: str) -> None:
-        if re.fullmatch(r"[\w\-]+", kid):
-            (self.knowledge_dir / f"{kid}.json").unlink(missing_ok=True)
-
-    def list_knowledge(self) -> list[dict[str, Any]]:
-        out = []
-        for p in self.knowledge_dir.glob("*.json"):
-            try:
-                out.append(json.loads(p.read_text(encoding="utf-8")))
-            except (OSError, json.JSONDecodeError):
-                continue
-        out.sort(key=lambda r: (r.get("added") or "", r.get("id")), reverse=True)
         return out
 
     # ---- 設定 ----
