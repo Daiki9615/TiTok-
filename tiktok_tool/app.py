@@ -10,6 +10,7 @@ import gradio as gr
 import pandas as pd
 
 from . import analyzer, exporter, structure
+from . import knowledge
 from .dictionary import DEFAULT_DICTIONARY, dictionary_to_text, text_to_dictionary
 from .exporter import fmt_ts
 from .pipeline import run_import
@@ -39,6 +40,7 @@ class App:
         self.transcriber = transcriber
         self.sheets = sheets
         self.tmp = Path(tempfile.mkdtemp(prefix="tiktok_export_"))
+        knowledge.seed(store)
 
     # ---------- 共通 ----------
     @property
@@ -238,11 +240,15 @@ class App:
         return "\n".join(lines)
 
     # ---------- ④ 構成作成 ----------
-    def build_structure(self, ids, intent, duration, kind, mood, *shop_vals):
+    def build_structure(self, ids, intent, duration, kind, mood, kn_ids, *shop_vals):
         refs = [self.store.get_video(i) for i in (ids or [])]
         shop = {k: (v or "").strip() for (k, _), v in zip(structure.SHOP_FIELDS, shop_vals)}
         sk = structure.build_skeleton(refs, self.dictionary, intent or "", float(duration or 30), kind, mood or "", shop)
         df = pd.DataFrame(structure.skeleton_table(sk), columns=structure.SKELETON_HEADERS)
+        kns = [self.store.get_knowledge(k) for k in (kn_ids or [])]
+        if kns:
+            sk["knowledge_ids"] = list(kn_ids)
+            sk["knowledge_digest"] = knowledge.prompt_digest(kns)
         return df, structure.claude_prompt(sk), sk
 
     def save_structure(self, sk, table, prompt, title, script, sid):
@@ -273,6 +279,46 @@ class App:
             lines += ["", "## 台本", script]
         lines += ["", "## Claude 用依頼文", prompt or ""]
         return self._write("structure.txt", "\n".join(lines))
+
+    # ---------- ⑥ 知見 ----------
+    def knowledge_choices(self, tag=""):
+        return [
+            (f"{k.get('title')}" + (f"（{'、'.join(k.get('tags') or [])}）" if k.get("tags") else ""), k["id"])
+            for k in self.store.list_knowledge()
+            if not tag or tag in (k.get("tags") or [])
+        ]
+
+    def knowledge_tags(self):
+        s: set[str] = set()
+        for k in self.store.list_knowledge():
+            s.update(k.get("tags") or [])
+        return [""] + sorted(s)
+
+    def show_knowledge(self, kid):
+        if not kid:
+            return "左上から知見を選んでください", "", "", "", "", "", None
+        k = self.store.get_knowledge(kid)
+        return (
+            knowledge.to_markdown(k), k.get("title", ""), k.get("source", ""), k.get("url", ""),
+            "、".join(k.get("tags") or []), k.get("body", ""), kid,
+        )
+
+    def save_knowledge(self, title, source, url, tags, body, kid):
+        if not (title or "").strip() or not (body or "").strip():
+            return "タイトルと内容は必ず入れてください", gr.update(), kid
+        rec = knowledge.new_record(title, source, url, tags, body, kid)
+        if kid:
+            rec["added"] = self.store.get_knowledge(kid).get("added") or rec["added"]
+        new_id = self.store.save_knowledge(rec)
+        return "保存しました", gr.update(choices=self.knowledge_choices(), value=new_id), new_id
+
+    def delete_knowledge(self, kid, confirm):
+        if not kid:
+            return "知見を選んでください", gr.update(), kid
+        if not confirm:
+            return "削除する場合は「本当に削除する」にチェックを入れてください", gr.update(), kid
+        self.store.delete_knowledge(kid)
+        return "削除しました", gr.update(choices=self.knowledge_choices(), value=None), None
 
     # ---------- ⑤ 辞書 ----------
     def save_dictionary(self, text):
@@ -381,6 +427,7 @@ class App:
                     saved = gr.Dropdown(self.structure_choices(), label="保存した構成案を開く")
                     refresh4 = gr.Button("動画の一覧を更新")
                 ids4 = gr.Dropdown([], multiselect=True, label="参考にする動画（1 本以上・任意）")
+                kn4 = gr.Dropdown(self.knowledge_choices(), multiselect=True, label="依頼文に入れる知見（任意・⑥ 知見 タブの内容）")
                 intent = gr.Textbox(lines=3, label="どんな動画にしたいか", placeholder="例: 30 秒で、20 代向けに、平日ランチのお得さを伝えたい")
                 with gr.Row():
                     duration = gr.Number(value=30, label="動画の長さ（秒）", minimum=5, maximum=600)
@@ -402,7 +449,8 @@ class App:
                 kind4.change(lambda k: gr.update(visible=(k == "shop")), kind4, shop_box)
                 refresh4.click(lambda: gr.update(choices=self.video_choices()), None, ids4)
                 demo.load(lambda: gr.update(choices=self.video_choices()), None, ids4)
-                build_btn.click(self.build_structure, [ids4, intent, duration, kind4, mood, *shop_inputs], [sk_table, prompt, sk_state]).then(lambda: None, None, sid_state)
+                demo.load(lambda: gr.update(choices=self.knowledge_choices()), None, kn4)
+                build_btn.click(self.build_structure, [ids4, intent, duration, kind4, mood, kn4, *shop_inputs], [sk_table, prompt, sk_state]).then(lambda: None, None, sid_state)
                 save4.click(self.save_structure, [sk_state, sk_table, prompt, title, script, sid_state], [msg4, saved, sid_state])
                 saved.change(self.load_structure, saved, [sk_table, prompt, title, script, sk_state, sid_state])
                 dl4.click(self.export_structure, [sk_table, prompt, title, script], file4)
@@ -420,6 +468,35 @@ class App:
                 demo.load(lambda: dictionary_to_text(self.dictionary), None, dict_text)
                 dsave.click(self.save_dictionary, dict_text, dmsg)
                 dreset.click(self.reset_dictionary, None, [dict_text, dmsg])
+
+            with gr.Tab("⑥ 知見"):
+                gr.Markdown("動画づくりに使うマーケティングの知見をまとめておく場所です。④ 構成作成で選ぶと、Claude 用の依頼文に要点が入ります。")
+                kid_state = gr.State(None)
+                with gr.Row():
+                    ktag = gr.Dropdown(self.knowledge_tags(), value="", label="タグで絞り込む", allow_custom_value=True)
+                    kpick = gr.Dropdown(self.knowledge_choices(), label="知見を選ぶ")
+                    knew = gr.Button("新しく追加する")
+                kview = gr.Markdown()
+                with gr.Accordion("編集・追加", open=False):
+                    ktitle = gr.Textbox(label="タイトル")
+                    with gr.Row():
+                        ksource = gr.Textbox(label="出典（動画名・記事名など）")
+                        kurl = gr.Textbox(label="URL（任意）")
+                        ktags = gr.Textbox(label="タグ（読点区切り）")
+                    kbody = gr.Textbox(
+                        lines=14, label="内容（Markdown。「## ひと言で」「## 動画づくりに使うなら」の見出しがあると、依頼文に要点だけ入ります）",
+                    )
+                    with gr.Row():
+                        ksave = gr.Button("保存", variant="primary")
+                        kconfirm = gr.Checkbox(label="本当に削除する")
+                        kdel = gr.Button("この知見を削除", variant="stop")
+                    kmsg = gr.Textbox(label="メッセージ", interactive=False)
+                demo.load(lambda: (gr.update(choices=self.knowledge_tags()), gr.update(choices=self.knowledge_choices())), None, [ktag, kpick])
+                ktag.change(lambda t: gr.update(choices=self.knowledge_choices(t), value=None), ktag, kpick)
+                kpick.change(self.show_knowledge, kpick, [kview, ktitle, ksource, kurl, ktags, kbody, kid_state])
+                knew.click(lambda: ("新しい知見を「編集・追加」に書いて保存してください", "", "", "", "", "## ひと言で\n\n## ポイント\n- \n\n## 動画づくりに使うなら\n- ", None), None, [kview, ktitle, ksource, kurl, ktags, kbody, kid_state])
+                ksave.click(self.save_knowledge, [ktitle, ksource, kurl, ktags, kbody, kid_state], [kmsg, kpick, kid_state])
+                kdel.click(self.delete_knowledge, [kid_state, kconfirm], [kmsg, kpick, kid_state])
         return demo
 
 

@@ -202,7 +202,8 @@ def test_app_builds(tmp_path):
     app.build()
     md, chart, words, hits, per, path = app.run_analysis(["1"])
     assert "構成の流れ" in md and Path(path).exists()
-    df, prompt, sk = app.build_structure(["1"], "テスト", 30, "shop", "", *[""] * len(structure.SHOP_FIELDS))
+    df, prompt, sk = app.build_structure(["1"], "テスト", 30, "shop", "", ["seed-01_bakune"], *[""] * len(structure.SHOP_FIELDS))
+    assert "使う場面" in prompt and "台本に活かしてほしい" in prompt
     msg, _, sid = app.save_structure(sk, df, prompt, "案1", "", None)
     assert sid and app.store.get_structure(sid)["title"] == "案1"
     assert "保存しました" in app.save_edit("1", app.show_video("1")[1].replace("パンケーキ", "ワッフル"), "shop", "A、B")
@@ -227,3 +228,27 @@ def test_sheets_mirror(tmp_path):
     assert m.sync([make_rec("1"), long]) == 2
     rows = SS.sheet1.rows
     assert rows[0][0] == "動画ID" and len(rows[2][14]) < 50000 and m.url
+
+
+def test_knowledge_seed_and_edit(tmp_path):
+    from tiktok_tool import knowledge
+    from tiktok_tool.app import App
+
+    s = DataStore(tmp_path)
+    app = App(s)
+    titles = {k["title"] for k in s.list_knowledge()}
+    assert {"BAKUNEが売れた本当の理由", "P&G流マーケティングの教科書（要点）", "P&Gでも教わらないブランディングの教科書（要点）"} <= titles
+    pg = s.get_knowledge("seed-02_pg_marketing")
+    assert pg["url"].startswith("https://note.com/") and "Job" in pg["body"]
+    d = knowledge.prompt_digest([pg])
+    assert "顧客の「Job" in d and "POD" in d and "注意" not in d
+    # 編集・削除しても、次に起動したとき元に戻らない
+    msg, _, kid = app.save_knowledge("BAKUNE（修正）", "動画", "", "売り方", "## ひと言で\n場面を売る", "seed-01_bakune")
+    s.delete_knowledge("seed-03_pg_branding")
+    App(s)
+    assert s.get_knowledge("seed-01_bakune")["title"] == "BAKUNE（修正）"
+    assert "seed-03_pg_branding" not in {k["id"] for k in s.list_knowledge()}
+    # 新規追加
+    msg, _, kid = app.save_knowledge("新しい知見", "", "", "a、b", "本文", None)
+    assert kid.startswith("k-") and s.get_knowledge(kid)["tags"] == ["a", "b"]
+    assert app.save_knowledge("", "", "", "", "", None)[0].startswith("タイトル")
